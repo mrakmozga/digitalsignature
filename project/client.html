@@ -323,8 +323,12 @@
 
 <script>
 const SERVER = 'http://localhost:5000';
-let tamperMsg = false;
-let tamperSigFlag = false;
+
+// Флаги для демонстрации атак подмены
+let tamperMsg = false;      // подмена сообщения (Сценарий 1)
+let tamperSigFlag = false;  // подмена подписи  (Сценарий 2)
+
+// Данные от сервера, сохраняются между шагами сценария 2
 let serverPublicKey = null;
 let serverSignature = null;
 let serverMessage = null;
@@ -338,6 +342,7 @@ function toggleTamperSig() {
   document.getElementById('tamperSig').classList.toggle('on', tamperSigFlag);
 }
 
+// Вспомогательные функции UI — не относятся к ЭЦП
 function log(id, msg, type='') {
   const log = document.getElementById(id);
   const now = new Date().toLocaleTimeString('ru', {hour12: false});
@@ -347,18 +352,13 @@ function log(id, msg, type='') {
   log.appendChild(entry);
   log.scrollTop = log.scrollHeight;
 }
-
 function setStep(prefix, num, state) {
   const el = document.getElementById(`${prefix}-${num}`);
   if (!el) return;
   el.className = 'step ' + state;
-  if (state === 'done') {
-    el.querySelector('.step-num').textContent = '✓';
-  } else if (state === 'active') {
-    el.querySelector('.step-num').textContent = num;
-  }
+  if (state === 'done') el.querySelector('.step-num').textContent = '✓';
+  else if (state === 'active') el.querySelector('.step-num').textContent = num;
 }
-
 function resetSteps(prefix, count) {
   for (let i = 1; i <= count; i++) {
     const el = document.getElementById(`${prefix}-${i}`);
@@ -367,7 +367,6 @@ function resetSteps(prefix, count) {
     el.querySelector('.step-num').textContent = i;
   }
 }
-
 function showResult(id, success, icon, text, meta) {
   const box = document.getElementById(id);
   box.className = `result-box show ${success ? 'success' : 'error'}`;
@@ -375,9 +374,14 @@ function showResult(id, success, icon, text, meta) {
   document.getElementById(id + '-text').textContent = text;
   document.getElementById(id + '-meta').textContent = meta;
 }
-
 function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 
+
+// =============================================================
+// СЦЕНАРИЙ 1: подпись на стороне клиента
+// Клиент сам подписывает сообщение и отправляет на сервер
+// для верификации. Сервер не хранит ключи клиента.
+// =============================================================
 async function runScenario1() {
   document.getElementById('log1').innerHTML = '';
   document.getElementById('result1').className = 'result-box';
@@ -387,24 +391,37 @@ async function runScenario1() {
   const message = document.getElementById('msg1').value.trim();
   if (!message) { alert('Введите сообщение!'); return; }
 
-  // Шаг 1: формируем сообщение
+  // Шаг 1: сообщение готово
   setStep('s1', 1, 'active');
   log('log1', `Сообщение: "${message.substring(0,40)}..."`);
   await sleep(600);
   setStep('s1', 1, 'done');
 
-  // Шаг 2: подписываем
+  // Шаг 2: генерация ключей и подпись
   setStep('s1', 2, 'active');
   log('log1', 'Генерация ключевой пары RSA-2048...');
   await sleep(200);
 
+  // Генерируем пару ключей прямо в браузере через библиотеку forge.
+  // bits: 2048 — длина модуля, e: 0x10001 (65537) — публичная экспонента
   const keyPair = forge.pki.rsa.generateKeyPair({ bits: 2048, e: 0x10001 });
   const privateKey = keyPair.privateKey;
+
+  // Публичный ключ сериализуем в PEM — текстовый формат с заголовком
+  // "-----BEGIN PUBLIC KEY-----", внутри Base64-закодированный DER
   const publicKeyPem = forge.pki.publicKeyToPem(keyPair.publicKey);
 
+  // Вычисляем SHA-256 хэш сообщения.
+  // Подписывается именно хэш, а не само сообщение:
+  // RSA медленный, а хэш фиксированной длины (32 байта) — быстро
   const md = forge.md.sha256.create();
   md.update(message, 'utf8');
+
+  // Подписываем хэш приватным ключом (RSA + PKCS1v15 внутри forge).
+  // Результат — бинарная строка байт
   const signature = privateKey.sign(md);
+
+  // Кодируем бинарную подпись в Base64 для передачи через JSON
   const signatureB64 = forge.util.encode64(signature);
 
   log('log1', `Ключи сгенерированы. Подпись: ${signatureB64.substring(0,20)}...`);
@@ -415,13 +432,21 @@ async function runScenario1() {
   document.getElementById('sig-preview').textContent = signatureB64;
   document.getElementById('s1-data').style.display = 'block';
 
-  // Шаг 3: отправляем
+  // Шаг 3: отправка на сервер
   setStep('s1', 3, 'active');
+
+  // Если включён тумблер подмены — изменяем сообщение перед отправкой.
+  // Подпись при этом остаётся от исходного текста, поэтому сервер
+  // обнаружит несоответствие: хэш изменённого сообщения не совпадёт
+  // с хэшем, зашитым в подписи
   const sentMessage = tamperMsg ? message + ' [ПОДДЕЛАНО]' : message;
   if (tamperMsg) log('log1', '⚠ Сообщение подменено перед отправкой!', 'err');
   log('log1', `POST /verify → сервер...`);
   await sleep(300);
 
+  // Отправляем три объекта: сообщение, подпись (Base64) и публичный ключ (PEM).
+  // Сервер использует публичный ключ чтобы проверить, что подпись
+  // действительно создана парным приватным ключом
   let response;
   try {
     response = await fetch(`${SERVER}/verify`, {
@@ -436,13 +461,13 @@ async function runScenario1() {
   }
   setStep('s1', 3, 'done');
 
-  // Шаг 4: сервер верифицирует
+  // Шаг 4: верификация на сервере (выполняется удалённо, ждём ответа)
   setStep('s1', 4, 'active');
   log('log1', 'Сервер проверяет подпись...');
   await sleep(500);
   setStep('s1', 4, 'done');
 
-  // Шаг 5: результат
+  // Шаг 5: результат верификации
   setStep('s1', 5, 'active');
   const data = await response.json();
   log('log1', `Результат: ${data.message}`, data.verified ? 'ok' : 'err');
@@ -455,6 +480,13 @@ async function runScenario1() {
   );
 }
 
+
+// =============================================================
+// СЦЕНАРИЙ 2: подпись на стороне сервера
+// Сервер подписывает сообщение своим приватным ключом.
+// Клиент верифицирует подпись локально — без дополнительных
+// запросов к серверу, используя заранее полученный публичный ключ.
+// =============================================================
 async function runScenario2() {
   document.getElementById('log2').innerHTML = '';
   document.getElementById('result2').className = 'result-box';
@@ -462,7 +494,8 @@ async function runScenario2() {
   resetSteps('s2', 5);
   serverPublicKey = null; serverSignature = null; serverMessage = null;
 
-  // Шаг 1: получаем публичный ключ
+  // Шаг 1: получаем публичный ключ сервера
+  // Он нужен заранее, чтобы потом проверить подпись локально.
   setStep('s2', 1, 'active');
   log('log2', 'GET /public-key...');
   let pkRes;
@@ -474,23 +507,25 @@ async function runScenario2() {
     return;
   }
   const pkData = await pkRes.json();
-  serverPublicKey = pkData.public_key;
+  serverPublicKey = pkData.public_key;  // сохраняем PEM, он понадобится на шаге 4
   log('log2', `Публичный ключ получен: ${serverPublicKey.substring(0,40)}...`);
   await sleep(400);
   setStep('s2', 1, 'done');
 
-  // Шаг 2: запрашиваем подписанное сообщение
+  // Шаг 2: инициируем запрос подписанного сообщения
   setStep('s2', 2, 'active');
   log('log2', 'GET /sign-message...');
   await sleep(300);
   setStep('s2', 2, 'done');
 
-  // Шаг 3: сервер подписывает
+  // Шаг 3: получаем сообщение и подпись от сервера
+  // Сервер подписывает его своим приватным
+  // Ключом и возвращает оба значения клиенту
   setStep('s2', 3, 'active');
   const msgRes = await fetch(`${SERVER}/sign-message`);
   const msgData = await msgRes.json();
   serverMessage = msgData.message;
-  serverSignature = msgData.signature;
+  serverSignature = msgData.signature;  // подпись в Base64
   log('log2', `Сообщение: "${msgData.message.substring(0,40)}"`);
   log('log2', `Подпись: ${serverSignature.substring(0,24)}...`);
   await sleep(400);
@@ -500,31 +535,41 @@ async function runScenario2() {
   document.getElementById('server-sig').textContent = serverSignature.substring(0, 80) + '...';
   document.getElementById('s2-data').style.display = 'block';
 
-  // Шаг 4: клиент верифицирует локально
+  // Шаг 4: верификация подписи локально, без запроса к серверу
   setStep('s2', 4, 'active');
   log('log2', 'Верификация на стороне клиента...');
   await sleep(400);
 
   let verified = false;
-  let errMsg = '';
   try {
+    // Парсим публичный ключ сервера из PEM-формата
     const pubKey = forge.pki.publicKeyFromPem(serverPublicKey);
+
+    // Если включён тумблер подмены — переворачиваем Base64-строку подписи.
+    // Это имитирует получение повреждённой или подменённой подписи
     const sigBytes = tamperSigFlag
-      ? forge.util.decode64(serverSignature.split('').reverse().join('').substring(0,serverSignature.length))
-      : forge.util.decode64(serverSignature);
+      ? forge.util.decode64(serverSignature.split('').reverse().join(''))
+      : forge.util.decode64(serverSignature);  // нормальный путь: декодируем Base64 в байты
 
     if (tamperSigFlag) log('log2', '⚠ Подпись подменена на клиенте!', 'err');
 
+    // Вычисляем SHA-256 хэш полученного сообщения — точно так же,
+    // как это делал сервер перед подписью
     const md = forge.md.sha256.create();
     md.update(serverMessage, 'utf8');
+
+    // Проверяем: соответствуют ли байты подписи хэшу сообщения
+    // при использовании публичного ключа сервера.
+    // forge.verify() возвращает true/false 
     verified = pubKey.verify(md.digest().bytes(), sigBytes);
   } catch(e) {
+    // Сюда попадаем если подпись настолько повреждена,
+    // что RSA-операция вообще не может быть выполнена
     verified = false;
-    errMsg = e.message;
   }
   setStep('s2', 4, 'done');
 
-  // Шаг 5: результат
+  // Шаг 5: итог
   setStep('s2', 5, 'active');
   await sleep(200);
   setStep('s2', 5, 'done');
