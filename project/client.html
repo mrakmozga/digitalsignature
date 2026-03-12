@@ -1,0 +1,542 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Электронная Цифровая Подпись — Демо</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/forge/1.3.1/forge.min.js"></script>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;600;700&family=Unbounded:wght@400;700;900&display=swap');
+
+  :root {
+    --bg: #0a0c10;
+    --surface: #10141c;
+    --border: #1e2535;
+    --accent1: #00d4ff;
+    --accent2: #7c3aed;
+    --green: #00ff88;
+    --red: #ff4466;
+    --text: #c8d4e8;
+    --muted: #4a5568;
+    --card: #131825;
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'JetBrains Mono', monospace;
+    min-height: 100vh;
+    padding: 32px 20px;
+  }
+
+  .grid-bg {
+    position: fixed; inset: 0; z-index: 0;
+    background-image:
+      linear-gradient(rgba(0,212,255,0.03) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(0,212,255,0.03) 1px, transparent 1px);
+    background-size: 40px 40px;
+    pointer-events: none;
+  }
+
+  .container { max-width: 900px; margin: 0 auto; position: relative; z-index: 1; }
+
+  header { text-align: center; margin-bottom: 48px; }
+  .title-tag {
+    display: inline-block;
+    font-size: 10px;
+    letter-spacing: 4px;
+    text-transform: uppercase;
+    color: var(--accent1);
+    border: 1px solid var(--accent1);
+    padding: 4px 12px;
+    margin-bottom: 16px;
+  }
+  h1 {
+    font-family: 'Unbounded', sans-serif;
+    font-size: clamp(22px, 4vw, 40px);
+    font-weight: 900;
+    background: linear-gradient(135deg, #fff 0%, var(--accent1) 100%);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    line-height: 1.2;
+    margin-bottom: 12px;
+  }
+  .subtitle { color: var(--muted); font-size: 13px; }
+
+  .scenarios { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+  @media (max-width: 700px) { .scenarios { grid-template-columns: 1fr; } }
+
+  .card {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 24px;
+    position: relative;
+    overflow: hidden;
+  }
+  .card::before {
+    content: '';
+    position: absolute;
+    top: 0; left: 0; right: 0;
+    height: 2px;
+  }
+  .card.scenario1::before { background: linear-gradient(90deg, var(--accent1), var(--accent2)); }
+  .card.scenario2::before { background: linear-gradient(90deg, var(--accent2), var(--green)); }
+
+  .card-header {
+    display: flex; align-items: center; gap: 10px; margin-bottom: 6px;
+  }
+  .scenario-badge {
+    font-family: 'Unbounded', sans-serif;
+    font-size: 9px;
+    font-weight: 700;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    padding: 3px 8px;
+    border-radius: 4px;
+  }
+  .scenario1 .scenario-badge { background: rgba(0,212,255,0.15); color: var(--accent1); }
+  .scenario2 .scenario-badge { background: rgba(124,58,237,0.2); color: #a78bfa; }
+
+  .card-title { font-family: 'Unbounded', sans-serif; font-size: 13px; font-weight: 700; }
+  .card-desc { color: var(--muted); font-size: 11px; margin-bottom: 20px; line-height: 1.6; }
+
+  /* Steps */
+  .steps { margin-bottom: 20px; }
+  .step {
+    display: flex; gap: 12px; align-items: flex-start;
+    padding: 8px 0; border-bottom: 1px solid var(--border);
+    font-size: 11px; color: var(--muted); transition: all 0.3s;
+  }
+  .step:last-child { border-bottom: none; }
+  .step.active { color: var(--text); }
+  .step.done { color: var(--green); }
+  .step-num {
+    width: 20px; height: 20px; border-radius: 50%;
+    border: 1px solid var(--border);
+    display: flex; align-items: center; justify-content: center;
+    font-size: 9px; flex-shrink: 0; font-weight: 600;
+    transition: all 0.3s;
+  }
+  .step.active .step-num { border-color: var(--accent1); color: var(--accent1); background: rgba(0,212,255,0.1); }
+  .step.done .step-num { border-color: var(--green); background: var(--green); color: #000; }
+
+  /* Inputs */
+  label { display: block; font-size: 10px; color: var(--muted); letter-spacing: 1px; text-transform: uppercase; margin-bottom: 6px; }
+  textarea, input[type="text"] {
+    width: 100%; background: var(--surface); border: 1px solid var(--border);
+    border-radius: 6px; color: var(--text); font-family: 'JetBrains Mono', monospace;
+    font-size: 11px; padding: 10px 12px; resize: vertical; outline: none;
+    transition: border-color 0.2s;
+  }
+  textarea:focus, input:focus { border-color: var(--accent1); }
+  textarea { min-height: 64px; }
+
+  .field { margin-bottom: 14px; }
+
+  .toggle-row { display: flex; align-items: center; gap: 10px; margin-bottom: 14px; }
+  .toggle-label { font-size: 11px; color: var(--muted); }
+  .toggle {
+    position: relative; width: 36px; height: 20px; cursor: pointer;
+    background: var(--border); border-radius: 10px; transition: background 0.3s;
+  }
+  .toggle.on { background: var(--red); }
+  .toggle::after {
+    content: ''; position: absolute; top: 3px; left: 3px;
+    width: 14px; height: 14px; border-radius: 50%;
+    background: white; transition: transform 0.3s;
+  }
+  .toggle.on::after { transform: translateX(16px); }
+
+  /* Buttons */
+  .btn {
+    width: 100%; padding: 12px; border: none; border-radius: 8px;
+    font-family: 'JetBrains Mono', monospace; font-size: 12px; font-weight: 600;
+    letter-spacing: 1px; cursor: pointer; transition: all 0.2s; text-transform: uppercase;
+  }
+  .btn:disabled { opacity: 0.4; cursor: not-allowed; }
+  .btn-primary {
+    background: linear-gradient(135deg, var(--accent1), var(--accent2));
+    color: white;
+  }
+  .btn-primary:hover:not(:disabled) { opacity: 0.85; transform: translateY(-1px); }
+  .btn-secondary {
+    background: transparent; border: 1px solid var(--accent2);
+    color: #a78bfa;
+  }
+  .btn-secondary:hover:not(:disabled) { background: rgba(124,58,237,0.1); }
+  .btn-sm {
+    width: auto; padding: 6px 14px; font-size: 10px; margin-top: 6px;
+  }
+
+  /* Result */
+  .result-box {
+    margin-top: 16px; padding: 14px; border-radius: 8px;
+    font-size: 11px; line-height: 1.6; display: none;
+    animation: fadeIn 0.4s ease;
+  }
+  .result-box.show { display: block; }
+  .result-box.success { background: rgba(0,255,136,0.08); border: 1px solid rgba(0,255,136,0.3); color: var(--green); }
+  .result-box.error { background: rgba(255,68,102,0.08); border: 1px solid rgba(255,68,102,0.3); color: var(--red); }
+  .result-box.info { background: rgba(0,212,255,0.06); border: 1px solid rgba(0,212,255,0.2); color: var(--accent1); }
+
+  .result-icon { font-size: 20px; margin-bottom: 6px; }
+  .result-meta { margin-top: 8px; color: var(--muted); font-size: 10px; }
+
+  /* Data display */
+  .data-row { margin-bottom: 12px; }
+  .data-val {
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: 4px; padding: 8px 10px; font-size: 10px;
+    color: var(--muted); word-break: break-all; max-height: 60px;
+    overflow-y: auto; line-height: 1.5;
+  }
+  .data-val.highlight { color: var(--accent1); border-color: rgba(0,212,255,0.3); }
+
+  /* Log */
+  .log {
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: 8px; padding: 12px; font-size: 10px;
+    max-height: 120px; overflow-y: auto; margin-top: 14px;
+  }
+  .log-entry { padding: 3px 0; border-bottom: 1px solid var(--border); display: flex; gap: 8px; }
+  .log-entry:last-child { border: none; }
+  .log-time { color: var(--muted); flex-shrink: 0; }
+  .log-msg { color: var(--text); }
+  .log-msg.ok { color: var(--green); }
+  .log-msg.err { color: var(--red); }
+
+  @keyframes fadeIn { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+
+  .separator { display: flex; align-items: center; gap: 12px; margin: 10px 0; }
+  .separator-line { flex: 1; height: 1px; background: var(--border); }
+  .separator-text { color: var(--muted); font-size: 10px; letter-spacing: 1px; }
+</style>
+</head>
+<body>
+<div class="grid-bg"></div>
+<div class="container">
+
+  <header>
+    <div class="title-tag">ЛР · Безопасность АС</div>
+    <h1>Электронная<br>Цифровая Подпись</h1>
+    <div class="subtitle">Демонстрация клиент-серверного взаимодействия с ЭЦП · RSA-2048 + SHA-256</div>
+  </header>
+
+  <div class="scenarios">
+
+    <!-- СЦЕНАРИЙ 1 -->
+    <div class="card scenario1">
+      <div class="card-header">
+        <span class="scenario-badge">Сценарий 1</span>
+      </div>
+      <div class="card-title" style="margin-bottom:8px">Подпись на стороне клиента</div>
+      <div class="card-desc">Клиент подписывает сообщение своим приватным ключом и отправляет на сервер для верификации.</div>
+
+      <div class="steps" id="steps1">
+        <div class="step" id="s1-1"><div class="step-num">1</div><span>Формируем сообщение</span></div>
+        <div class="step" id="s1-2"><div class="step-num">2</div><span>Подписываем приватным ключом</span></div>
+        <div class="step" id="s1-3"><div class="step-num">3</div><span>Отправляем на сервер</span></div>
+        <div class="step" id="s1-4"><div class="step-num">4</div><span>Сервер верифицирует подпись</span></div>
+        <div class="step" id="s1-5"><div class="step-num">5</div><span>Получаем результат</span></div>
+      </div>
+
+      <div class="field">
+        <label>Сообщение</label>
+        <textarea id="msg1" placeholder="Введите сообщение для подписи...">Перевод 50 000 руб. на счёт №40817810000012345678</textarea>
+      </div>
+
+      <div class="toggle-row">
+        <div class="toggle" id="tamperToggle" onclick="toggleTamper()"></div>
+        <span class="toggle-label">Подделать сообщение перед отправкой</span>
+      </div>
+
+      <button class="btn btn-primary" onclick="runScenario1()">▶ Запустить сценарий</button>
+
+      <div id="s1-data" style="display:none; margin-top:16px">
+        <div class="data-row">
+          <label>Публичный ключ клиента (фрагмент)</label>
+          <div class="data-val highlight" id="pubkey-preview">—</div>
+        </div>
+        <div class="data-row">
+          <label>Подпись (Base64)</label>
+          <div class="data-val" id="sig-preview">—</div>
+        </div>
+      </div>
+
+      <div id="result1" class="result-box">
+        <div class="result-icon" id="result1-icon"></div>
+        <div id="result1-text"></div>
+        <div class="result-meta" id="result1-meta"></div>
+      </div>
+
+      <div class="log" id="log1"></div>
+    </div>
+
+    <!-- СЦЕНАРИЙ 2 -->
+    <div class="card scenario2">
+      <div class="card-header">
+        <span class="scenario-badge">Сценарий 2</span>
+      </div>
+      <div class="card-title" style="margin-bottom:8px">Подпись на стороне сервера</div>
+      <div class="card-desc">Сервер генерирует и подписывает сообщение. Клиент верифицирует подпись публичным ключом сервера.</div>
+
+      <div class="steps" id="steps2">
+        <div class="step" id="s2-1"><div class="step-num">1</div><span>Запрашиваем публичный ключ сервера</span></div>
+        <div class="step" id="s2-2"><div class="step-num">2</div><span>Запрашиваем подписанное сообщение</span></div>
+        <div class="step" id="s2-3"><div class="step-num">3</div><span>Сервер подписывает и отправляет</span></div>
+        <div class="step" id="s2-4"><div class="step-num">4</div><span>Клиент верифицирует локально</span></div>
+        <div class="step" id="s2-5"><div class="step-num">5</div><span>Определяем подлинность</span></div>
+      </div>
+
+      <button class="btn btn-secondary" onclick="runScenario2()" style="margin-bottom:14px">▶ Запустить сценарий</button>
+
+      <div id="s2-data" style="display:none">
+        <div class="data-row">
+          <label>Сообщение от сервера</label>
+          <div class="data-val highlight" id="server-msg">—</div>
+        </div>
+        <div class="data-row">
+          <label>Подпись сервера (Base64, фрагмент)</label>
+          <div class="data-val" id="server-sig">—</div>
+        </div>
+      </div>
+
+      <div class="toggle-row" style="margin-top:10px">
+        <div class="toggle" id="tamperSig" onclick="toggleTamperSig()"></div>
+        <span class="toggle-label">Подделать подпись на клиенте</span>
+      </div>
+
+      <div id="result2" class="result-box">
+        <div class="result-icon" id="result2-icon"></div>
+        <div id="result2-text"></div>
+        <div class="result-meta" id="result2-meta"></div>
+      </div>
+
+      <div class="log" id="log2"></div>
+    </div>
+
+  </div>
+</div>
+
+<script>
+const SERVER = 'http://localhost:5000';
+let tamperMsg = false;
+let tamperSigFlag = false;
+let serverPublicKey = null;
+let serverSignature = null;
+let serverMessage = null;
+
+function toggleTamper() {
+  tamperMsg = !tamperMsg;
+  document.getElementById('tamperToggle').classList.toggle('on', tamperMsg);
+}
+function toggleTamperSig() {
+  tamperSigFlag = !tamperSigFlag;
+  document.getElementById('tamperSig').classList.toggle('on', tamperSigFlag);
+}
+
+function log(id, msg, type='') {
+  const log = document.getElementById(id);
+  const now = new Date().toLocaleTimeString('ru', {hour12: false});
+  const entry = document.createElement('div');
+  entry.className = 'log-entry';
+  entry.innerHTML = `<span class="log-time">${now}</span><span class="log-msg ${type}">${msg}</span>`;
+  log.appendChild(entry);
+  log.scrollTop = log.scrollHeight;
+}
+
+function setStep(prefix, num, state) {
+  const el = document.getElementById(`${prefix}-${num}`);
+  if (!el) return;
+  el.className = 'step ' + state;
+  if (state === 'done') {
+    el.querySelector('.step-num').textContent = '✓';
+  } else if (state === 'active') {
+    el.querySelector('.step-num').textContent = num;
+  }
+}
+
+function resetSteps(prefix, count) {
+  for (let i = 1; i <= count; i++) {
+    const el = document.getElementById(`${prefix}-${i}`);
+    if (!el) continue;
+    el.className = 'step';
+    el.querySelector('.step-num').textContent = i;
+  }
+}
+
+function showResult(id, success, icon, text, meta) {
+  const box = document.getElementById(id);
+  box.className = `result-box show ${success ? 'success' : 'error'}`;
+  document.getElementById(id + '-icon').textContent = icon;
+  document.getElementById(id + '-text').textContent = text;
+  document.getElementById(id + '-meta').textContent = meta;
+}
+
+function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
+
+async function runScenario1() {
+  document.getElementById('log1').innerHTML = '';
+  document.getElementById('result1').className = 'result-box';
+  document.getElementById('s1-data').style.display = 'none';
+  resetSteps('s1', 5);
+
+  const message = document.getElementById('msg1').value.trim();
+  if (!message) { alert('Введите сообщение!'); return; }
+
+  // Шаг 1: формируем сообщение
+  setStep('s1', 1, 'active');
+  log('log1', `Сообщение: "${message.substring(0,40)}..."`);
+  await sleep(600);
+  setStep('s1', 1, 'done');
+
+  // Шаг 2: подписываем
+  setStep('s1', 2, 'active');
+  log('log1', 'Генерация ключевой пары RSA-2048...');
+  await sleep(200);
+
+  const keyPair = forge.pki.rsa.generateKeyPair({ bits: 2048, e: 0x10001 });
+  const privateKey = keyPair.privateKey;
+  const publicKeyPem = forge.pki.publicKeyToPem(keyPair.publicKey);
+
+  const md = forge.md.sha256.create();
+  md.update(message, 'utf8');
+  const signature = privateKey.sign(md);
+  const signatureB64 = forge.util.encode64(signature);
+
+  log('log1', `Ключи сгенерированы. Подпись: ${signatureB64.substring(0,20)}...`);
+  await sleep(400);
+  setStep('s1', 2, 'done');
+
+  document.getElementById('pubkey-preview').textContent = publicKeyPem.substring(0, 120) + '...';
+  document.getElementById('sig-preview').textContent = signatureB64;
+  document.getElementById('s1-data').style.display = 'block';
+
+  // Шаг 3: отправляем
+  setStep('s1', 3, 'active');
+  const sentMessage = tamperMsg ? message + ' [ПОДДЕЛАНО]' : message;
+  if (tamperMsg) log('log1', '⚠ Сообщение подменено перед отправкой!', 'err');
+  log('log1', `POST /verify → сервер...`);
+  await sleep(300);
+
+  let response;
+  try {
+    response = await fetch(`${SERVER}/verify`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ message: sentMessage, signature: signatureB64, public_key: publicKeyPem })
+    });
+  } catch(e) {
+    log('log1', 'Ошибка: сервер недоступен', 'err');
+    showResult('result1', false, '🔌', 'Сервер недоступен. Запустите server.py', 'python server.py');
+    return;
+  }
+  setStep('s1', 3, 'done');
+
+  // Шаг 4: сервер верифицирует
+  setStep('s1', 4, 'active');
+  log('log1', 'Сервер проверяет подпись...');
+  await sleep(500);
+  setStep('s1', 4, 'done');
+
+  // Шаг 5: результат
+  setStep('s1', 5, 'active');
+  const data = await response.json();
+  log('log1', `Результат: ${data.message}`, data.verified ? 'ok' : 'err');
+  setStep('s1', 5, 'done');
+
+  showResult('result1', data.verified,
+    data.verified ? '🔐' : '⚠️',
+    data.message,
+    `Алгоритм: ${data.algorithm}`
+  );
+}
+
+async function runScenario2() {
+  document.getElementById('log2').innerHTML = '';
+  document.getElementById('result2').className = 'result-box';
+  document.getElementById('s2-data').style.display = 'none';
+  resetSteps('s2', 5);
+  serverPublicKey = null; serverSignature = null; serverMessage = null;
+
+  // Шаг 1: получаем публичный ключ
+  setStep('s2', 1, 'active');
+  log('log2', 'GET /public-key...');
+  let pkRes;
+  try {
+    pkRes = await fetch(`${SERVER}/public-key`);
+  } catch(e) {
+    log('log2', 'Ошибка: сервер недоступен', 'err');
+    showResult('result2', false, '🔌', 'Сервер недоступен. Запустите server.py', 'python server.py');
+    return;
+  }
+  const pkData = await pkRes.json();
+  serverPublicKey = pkData.public_key;
+  log('log2', `Публичный ключ получен: ${serverPublicKey.substring(0,40)}...`);
+  await sleep(400);
+  setStep('s2', 1, 'done');
+
+  // Шаг 2: запрашиваем подписанное сообщение
+  setStep('s2', 2, 'active');
+  log('log2', 'GET /sign-message...');
+  await sleep(300);
+  setStep('s2', 2, 'done');
+
+  // Шаг 3: сервер подписывает
+  setStep('s2', 3, 'active');
+  const msgRes = await fetch(`${SERVER}/sign-message`);
+  const msgData = await msgRes.json();
+  serverMessage = msgData.message;
+  serverSignature = msgData.signature;
+  log('log2', `Сообщение: "${msgData.message.substring(0,40)}"`);
+  log('log2', `Подпись: ${serverSignature.substring(0,24)}...`);
+  await sleep(400);
+  setStep('s2', 3, 'done');
+
+  document.getElementById('server-msg').textContent = serverMessage;
+  document.getElementById('server-sig').textContent = serverSignature.substring(0, 80) + '...';
+  document.getElementById('s2-data').style.display = 'block';
+
+  // Шаг 4: клиент верифицирует локально
+  setStep('s2', 4, 'active');
+  log('log2', 'Верификация на стороне клиента...');
+  await sleep(400);
+
+  let verified = false;
+  let errMsg = '';
+  try {
+    const pubKey = forge.pki.publicKeyFromPem(serverPublicKey);
+    const sigBytes = tamperSigFlag
+      ? forge.util.decode64(serverSignature.split('').reverse().join('').substring(0,serverSignature.length))
+      : forge.util.decode64(serverSignature);
+
+    if (tamperSigFlag) log('log2', '⚠ Подпись подменена на клиенте!', 'err');
+
+    const md = forge.md.sha256.create();
+    md.update(serverMessage, 'utf8');
+    verified = pubKey.verify(md.digest().bytes(), sigBytes);
+  } catch(e) {
+    verified = false;
+    errMsg = e.message;
+  }
+  setStep('s2', 4, 'done');
+
+  // Шаг 5: результат
+  setStep('s2', 5, 'active');
+  await sleep(200);
+  setStep('s2', 5, 'done');
+
+  log('log2', verified ? 'Подпись верна — сообщение подлинное' : 'Подпись неверна!', verified ? 'ok' : 'err');
+
+  showResult('result2', verified,
+    verified ? '✅' : '❌',
+    verified ? 'Подпись верна! Сообщение отправлено именно сервером.' : 'Подпись недействительна! Сообщение подделано.',
+    `Алгоритм: ${msgData.algorithm} · Верификация: клиент`
+  );
+}
+</script>
+</body>
+</html>

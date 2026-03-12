@@ -1,0 +1,16 @@
+services:
+  server:
+    build: .
+    ports:
+      - "5000:5000"
+    restart: unless-stopped
+
+  client:
+    image: nginx:alpine
+    ports:
+      - "8080:80"
+    volumes:
+      - ./client.html:/usr/share/nginx/html/index.html:ro
+    depends_on:
+      - server
+    restart: unless-stopped
